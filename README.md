@@ -1,5 +1,5 @@
 # ztream
-A simple drawing header-only library for C under windows.
+A simple header-only library drawing on console for C on windows.
 
 - Supports RGB color.
 - Supports unicode.
