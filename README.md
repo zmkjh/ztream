@@ -1,5 +1,5 @@
-# ztream
-A simple header-only library drawing on console for C on windows.
+# ztream-multi
+A simple header-only library drawing on console for C.
 
 - Supports RGB color.
 - Supports unicode.
@@ -7,4 +7,5 @@ A simple header-only library drawing on console for C on windows.
 - Supprots FPS maintaining.
 - Supports ECS for game programing.
 
-# Sample Game: https://github.com/zmkjh/Terracraft
+# NOTICE
+- is not ready for use now
