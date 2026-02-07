@@ -1,4 +1,4 @@
-// copyright. zjh 2025/11/23 - --
+// copyright. zmkjh 2026/3/6 - --
 
 #ifndef ZTREAM_CONTAINER_C
 #define ZTREAM_CONTAINER_C
@@ -6,6 +6,7 @@
 #include "container.h"
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 
 static inline ztream_container_t ztream_container_alloc(ztream_size_t single, ztream_size_t reserve) {
     ztream_container_t container;
@@ -36,10 +37,11 @@ static inline void ztream_container_clear(ztream_container_t* container) {
 
 static inline void ztream_container_resize(ztream_container_t* container, ztream_size_t size) {
     ztream_data_t new_zone = malloc(container->single * size);
+
     memset(new_zone, 0, container->single * size);
     ztream_size_t new_tail = container->tail - container->head <= size ?
                                 container->tail - container->head : size;
-                                
+
     memmove(
         new_zone,
         (unsigned char*)container->data + container->single * container->head,
@@ -146,7 +148,7 @@ static inline ztream_list_node_t* ztream_list_tail(ztream_list_t* list) {
 }
 
 static inline int ztream_list_empty(ztream_list_t* list) {
-    return ztream_list_next(list->head)->next == NULL;
+    return list->size == 0;
 }
 
 static inline ztream_list_node_t* ztream_list_last(ztream_list_node_t* node) {
@@ -206,6 +208,7 @@ static inline ztream_hive_block_t ztream_hive_block_alloc(ztream_size_t single, 
     block.free_nodes = ztream_container_alloc(ZTREAM_TYPE_SINGLE(ztream_list_node_t*), size);
     ztream_container_revalue(&block.data, size);
     ztream_container_revalue(&block.skip_field, size);
+    ztream_container_revalue(&block.free_nodes, size);
     block.free_list = ztream_list_alloc(ZTREAM_TYPE_SINGLE(ztream_hive_block_itor_t));
 
     *ZTREAM_DATA_DECODE(ztream_container_get(&block.skip_field, 0), ztream_size_t)      = size;
@@ -224,71 +227,149 @@ static inline int ztream_hive_block_has_free(ztream_hive_block_t* block) {
 }
 
 static inline ztream_hive_block_itor_t ztream_hive_block_emplace(ztream_hive_block_t* block) {
-    ztream_list_node_t*         free_id_node        = ZTREAM_DATA_DECODE(ztream_list_head(&block->free_list)->next, ztream_list_node_t);
-    ztream_hive_block_itor_t*   free_id             = ZTREAM_DATA_DECODE(ztream_list_data(free_id_node), ztream_hive_block_itor_t);
-    ztream_size_t*              free_id_skip        = ZTREAM_DATA_DECODE(ztream_container_get(&block->skip_field, *free_id), ztream_size_t);
-    ztream_hive_block_itor_t    free_end            = *free_id + *free_id_skip - 1;
-    ztream_size_t*              free_end_skip       = ZTREAM_DATA_DECODE(ztream_container_get(&block->skip_field, free_end), ztream_size_t);
-    ztream_hive_block_itor_t    free_next           = *free_id + 1;
-    ztream_size_t*              free_next_skip      = ZTREAM_DATA_DECODE(ztream_container_get(&block->skip_field, free_next), ztream_size_t);
-    ztream_list_node_t**        free_next_free_node = ZTREAM_DATA_DECODE(ztream_container_get(&block->free_nodes, free_next), ztream_list_node_t*);
+    ztream_list_node_t* free_id_node = ZTREAM_DATA_DECODE(ztream_list_head(&block->free_list)->next, ztream_list_node_t);
+    if (!free_id_node) return 0;
 
-    *free_end_skip = *free_end_skip - 1;
-    *free_id_skip  = 0;
+    ztream_hive_block_itor_t* free_id = ZTREAM_DATA_DECODE(ztream_list_data(free_id_node), ztream_hive_block_itor_t);
+
+    if (*free_id >= block->skip_field.size) return 0;
+
+    ztream_size_t* free_id_skip = ZTREAM_DATA_DECODE(ztream_container_get(&block->skip_field, *free_id), ztream_size_t);
+    if (*free_id_skip == 0) return 0;
+
+    ztream_hive_block_itor_t free_end = *free_id + *free_id_skip - 1;
+    if (free_end >= block->skip_field.size) return 0;
+
+    ztream_size_t* free_end_skip = ZTREAM_DATA_DECODE(ztream_container_get(&block->skip_field, free_end), ztream_size_t);
 
     ztream_hive_block_itor_t result = *free_id;
+
+    // alloc the first block
+    *free_end_skip = *free_end_skip - 1;
+    *free_id_skip = 0;
+
     if (*free_end_skip == 0) {
         ztream_list_erase(&block->free_list, free_id_node);
+
+        // clean up
+        if (result < block->free_nodes.size) {
+            *ZTREAM_DATA_DECODE(ztream_container_get(&block->free_nodes, result), ztream_list_node_t*) = NULL;
+        }
     } else {
-        *free_id = free_next;
-        *free_next_skip = *free_end_skip;
-        *free_next_free_node = free_id_node;
+        ztream_hive_block_itor_t free_next = *free_id + 1;
+
+        if (free_next < block->skip_field.size) {
+            ztream_size_t* free_next_skip = ZTREAM_DATA_DECODE(ztream_container_get(&block->skip_field, free_next), ztream_size_t);
+
+            if (free_next < block->free_nodes.size) {
+                ztream_list_node_t** free_next_free_node = ZTREAM_DATA_DECODE(
+                    ztream_container_get(&block->free_nodes, free_next), ztream_list_node_t*);
+
+                *free_id = free_next;
+                *free_next_skip = *free_end_skip;
+                *free_next_free_node = free_id_node;
+
+                // clean up
+                if (result < block->free_nodes.size) {
+                    *ZTREAM_DATA_DECODE(ztream_container_get(&block->free_nodes, result), ztream_list_node_t*) = NULL;
+                }
+            }
+        }
     }
-    
+
     return result + 1;
 }
 
+
 static inline void ztream_hive_block_release(ztream_hive_block_t* block, ztream_hive_block_itor_t id) {
     id--;
+
+    if (id >= block->data.size) return;
+
     ztream_size_t* skip = ZTREAM_DATA_DECODE(ztream_container_get(&block->skip_field, id), ztream_size_t);
 
+    // merge the left side
     if (id > 0) {
-        ztream_hive_block_itor_t last_id   = id - 1;
-        ztream_size_t*           last_skip = ZTREAM_DATA_DECODE(ztream_container_get(&block->skip_field, last_id), ztream_size_t);
-        if (*last_skip != 0) {
-            ztream_hive_block_itor_t grand_id     = last_id - *last_skip + 1;
-            ztream_size_t*           grand_skip   = ZTREAM_DATA_DECODE(ztream_container_get(&block->skip_field, grand_id), ztream_size_t);
+        ztream_hive_block_itor_t last_id = id - 1;
+        ztream_size_t* last_skip = ZTREAM_DATA_DECODE(ztream_container_get(&block->skip_field, last_id), ztream_size_t);
 
+        if (*last_skip != 0) {
+            // merge
+            ztream_hive_block_itor_t grand_id = last_id - *last_skip + 1;
+            ztream_size_t* grand_skip = ZTREAM_DATA_DECODE(ztream_container_get(&block->skip_field, grand_id), ztream_size_t);
+
+            // update size
             *grand_skip = *grand_skip + 1;
-            *skip       = *grand_skip;
+            *skip = *grand_skip;  // update the end point
         } else {
+            // create a new free block whose size is 1
             *skip = 1;
-            *ZTREAM_DATA_DECODE(ztream_container_get(&block->free_nodes, id), ztream_list_node_t*) =
-                ztream_list_insert(&block->free_list, ztream_list_head(&block->free_list), &id);
+            ztream_hive_block_itor_t temp_id = id;
+            ztream_list_node_t* new_node = ztream_list_insert(&block->free_list,
+                ztream_list_head(&block->free_list), &temp_id);
+            if (id < block->free_nodes.size) {
+                *ZTREAM_DATA_DECODE(ztream_container_get(&block->free_nodes, id), ztream_list_node_t*) = new_node;
+            }
         }
     } else {
+        // create a new free block whose size is 1
         *skip = 1;
-        *ZTREAM_DATA_DECODE(ztream_container_get(&block->free_nodes, id), ztream_list_node_t*) =
-            ztream_list_insert(&block->free_list, ztream_list_head(&block->free_list), &id);
+        ztream_hive_block_itor_t temp_id = id;
+        ztream_list_node_t* new_node = ztream_list_insert(&block->free_list,
+            ztream_list_head(&block->free_list), &temp_id);
+        if (id < block->free_nodes.size) {
+            *ZTREAM_DATA_DECODE(ztream_container_get(&block->free_nodes, id), ztream_list_node_t*) = new_node;
+        }
     }
 
+    // merge the right side
     if (id + 1 < block->data.size) {
-        ztream_hive_block_itor_t next_id   = id + 1;
-        ztream_size_t*           next_skip = ZTREAM_DATA_DECODE(ztream_container_get(&block->skip_field, next_id), ztream_size_t);
+        ztream_hive_block_itor_t next_id = id + 1;
+        ztream_size_t* next_skip = ZTREAM_DATA_DECODE(ztream_container_get(&block->skip_field, next_id), ztream_size_t);
+
         if (*next_skip != 0) {
-            ztream_hive_block_itor_t grand_id     = next_id + *next_skip - 1;
-            ztream_size_t*           grand_skip   = ZTREAM_DATA_DECODE(ztream_container_get(&block->skip_field, grand_id), ztream_size_t);
-            ztream_hive_block_itor_t before_id    = id - *skip + 1;
-            ztream_size_t*           before_skip  = ZTREAM_DATA_DECODE(ztream_container_get(&block->skip_field, before_id), ztream_size_t);
-            ztream_list_node_t*      next_node    = *ZTREAM_DATA_DECODE(ztream_container_get(&block->free_nodes, next_id), ztream_list_node_t*);
+            // merge
+            ztream_hive_block_itor_t grand_id = next_id + *next_skip - 1;
+            ztream_size_t* grand_skip = ZTREAM_DATA_DECODE(ztream_container_get(&block->skip_field, grand_id), ztream_size_t);
 
-            ztream_list_erase(&block->free_list, next_node);
+            // find its start
+            ztream_hive_block_itor_t before_id = id;
+            ztream_size_t* before_skip = skip;
 
-            *before_skip = *before_skip + *next_skip;
-            *grand_skip  = *before_skip;
+            // if *skip > 1, the left side had been merged, so it starts from id - (*skip - 1)
+            if (*skip > 1) {
+                before_id = id - (*skip - 1);
+                before_skip = ZTREAM_DATA_DECODE(ztream_container_get(&block->skip_field, before_id), ztream_size_t);
+            }
+
+            // erase the useless node
+            if (next_id < block->free_nodes.size) {
+                ztream_list_node_t* right_node = *ZTREAM_DATA_DECODE(ztream_container_get(&block->free_nodes, next_id), ztream_list_node_t*);
+                if (right_node) {
+                    ztream_list_erase(&block->free_list, right_node);
+                    *ZTREAM_DATA_DECODE(ztream_container_get(&block->free_nodes, next_id), ztream_list_node_t*) = NULL;
+                }
+            }
+
+            // sum the size
+            ztream_size_t new_size = *before_skip + *next_skip;
+            *before_skip = new_size;
+            *grand_skip = new_size;
+
+            // when current block is an inner space which means it had been merged with the left one, clean it.
+            if (before_id != id) {
+                *skip = 0;  // clean
+            }
+
+            // clean up
+            if (next_id < block->free_nodes.size) {
+                *ZTREAM_DATA_DECODE(ztream_container_get(&block->free_nodes, next_id), ztream_list_node_t*) = NULL;
+            }
         }
     }
 }
+
+
 
 static inline ztream_data_t ztream_hive_block_data(ztream_hive_block_t* block, ztream_hive_block_itor_t id) {
     id--;
@@ -297,21 +378,36 @@ static inline ztream_data_t ztream_hive_block_data(ztream_hive_block_t* block, z
 }
 
 static inline ztream_hive_block_itor_t ztream_hive_block_next(ztream_hive_block_t* block, ztream_hive_block_itor_t id) {
+    if (!block) {
+        return 0;
+    }
+
     id--;
+
+    if (id + 1 >= ztream_container_size(&block->skip_field)) {
+        return 0;
+    }
 
     ztream_hive_block_itor_t result = id + 1 + *ZTREAM_DATA_DECODE(ztream_container_get(&block->skip_field, id + 1), ztream_size_t);
     if (result >= ztream_container_size(&block->data)) {
         return 0;
     }
+
     return result + 1;
 }
 
+
 static inline ztream_hive_block_itor_t ztream_hive_block_iterator(ztream_hive_block_t* block) {
+    if (!block) {
+        return 0;
+    }
+
     ztream_hive_block_itor_t result = *ZTREAM_DATA_DECODE(ztream_container_get(&block->skip_field, 0), ztream_size_t);
 
     if (result >= ztream_container_size(&block->data)) {
         return 0;
     }
+
     return result + 1;
 }
 
@@ -363,68 +459,100 @@ static inline ztream_hive_itor_t ztream_hive_emplace(ztream_hive_t* hive) {
 static inline void ztream_hive_release(ztream_hive_t* hive, ztream_hive_itor_t* itor) {
     if(!itor->valid)
         return;
-    
+
     ztream_hive_block_t* block = ZTREAM_DATA_DECODE(ztream_list_data(itor->block_node), ztream_hive_block_t);
     if (!ztream_hive_block_has_free(block))
         ztream_list_insert(&hive->free_blocks, ztream_list_head(&hive->free_blocks), ZTREAM_DATA_ENCODE(&itor->block_node));
     ztream_hive_block_release(block, itor->block_itor);
     itor->valid = 0;
+    itor->block_node = NULL;
+    itor->block_itor = 0;
 }
 
 static inline ztream_data_t ztream_hive_data(ztream_hive_t* hive, ztream_hive_itor_t* itor) {
-    if (!itor->valid)
+    if (!itor->valid || !itor->block_node)
         return NULL;
+
     ztream_hive_block_t* block = ZTREAM_DATA_DECODE(ztream_list_data(itor->block_node), ztream_hive_block_t);
+    if (!block)
+        return NULL;
+
     return ztream_hive_block_data(block, itor->block_itor);
 }
 
 static inline ztream_hive_itor_t ztream_hive_iterator(ztream_hive_t* hive) {
-    ztream_list_node_t*      block_node = ztream_list_next(ztream_list_head(&hive->block_list));
-    ztream_hive_block_t*     block      = ZTREAM_DATA_DECODE(ztream_list_data(block_node), ztream_hive_block_t);
-    ztream_hive_block_itor_t block_itor = ztream_hive_block_iterator(block);
-    while (!block_itor && ztream_list_next(block_node) && ztream_list_next(ztream_list_next(block_node))) {
+    ztream_list_node_t* block_node = ztream_list_next(ztream_list_head(&hive->block_list));
+
+    while (block_node) {
+        ztream_hive_block_t* block = ZTREAM_DATA_DECODE(ztream_list_data(block_node), ztream_hive_block_t);
+        if (!block) {
+            // it's the end
+            break;
+        }
+
+        ztream_hive_block_itor_t block_itor = ztream_hive_block_iterator(block);
+        if (block_itor) {
+            // found it out
+            return (ztream_hive_itor_t){1, block_node, block_itor};
+        }
+
+        // move to the next
         block_node = ztream_list_next(block_node);
-        block      = ZTREAM_DATA_DECODE(ztream_list_data(block_node), ztream_hive_block_t);
-        block_itor = ztream_hive_block_iterator(block);
     }
-    if (!block_itor) {
-        return (ztream_hive_itor_t){0, NULL, 0};
-    }
-    return (ztream_hive_itor_t){1, block_node, block_itor};
+
+    // failed
+    return (ztream_hive_itor_t){0, NULL, 0};
 }
 
 static inline int ztream_hive_iterator_valid(ztream_hive_itor_t* itor) {
-    return itor->valid;
+    return itor->valid && itor->block_node;
 }
 
 static inline ztream_hive_itor_t ztream_hive_next(ztream_hive_t* hive, ztream_hive_itor_t* itor) {
     if (!ztream_hive_iterator_valid(itor))
         return (ztream_hive_itor_t){0, NULL, 0};
-    ztream_hive_block_itor_t next_block_itor = ztream_hive_block_next(ZTREAM_DATA_DECODE(ztream_list_data(itor->block_node), ztream_hive_block_t), itor->block_itor);
-    if (!next_block_itor) {
-        ztream_list_node_t*      block_node = ztream_list_next(itor->block_node);
-        if (!ztream_list_next(block_node)) {
-            return (ztream_hive_itor_t){0, NULL, 0};
-        }
-        ztream_hive_block_t*     block      = ZTREAM_DATA_DECODE(ztream_list_data(block_node), ztream_hive_block_t);
-        ztream_hive_block_itor_t block_itor = ztream_hive_block_iterator(block);
-        while (!block_itor && block_node && ztream_list_next(block_node)) {
-            block_itor = ztream_hive_block_iterator(block);
-            block_node = ztream_list_next(block_node);
-            block      = ZTREAM_DATA_DECODE(ztream_list_data(block_node), ztream_hive_block_t);
-        }
-        if (!block_itor) {
-            return (ztream_hive_itor_t){0, NULL, 0};
-        } else {
-            return (ztream_hive_itor_t){1, block_node, block_itor};
-        }
+
+    ztream_hive_block_t* block = ZTREAM_DATA_DECODE(ztream_list_data(itor->block_node), ztream_hive_block_t);
+    if (!block) {
+        return (ztream_hive_itor_t){0, NULL, 0};
     }
 
+    ztream_hive_block_itor_t next_block_itor = ztream_hive_block_next(block, itor->block_itor);
+
+    if (!next_block_itor) {
+        // when current block has no free elements, try to find another.
+        ztream_list_node_t* block_node = ztream_list_next(itor->block_node);
+
+        // iterate all
+        while (block_node) {
+            block = ZTREAM_DATA_DECODE(ztream_list_data(block_node), ztream_hive_block_t);
+            if (!block) {
+                // it's the end
+                break;
+            }
+
+            ztream_hive_block_itor_t block_itor = ztream_hive_block_iterator(block);
+            if (block_itor) {
+                // found it out
+                return (ztream_hive_itor_t){1, block_node, block_itor};
+            }
+
+            // next turn
+            block_node = ztream_list_next(block_node);
+        }
+
+        // failed
+        return (ztream_hive_itor_t){0, NULL, 0};
+    }
+
+    // done
     return (ztream_hive_itor_t){1, itor->block_node, next_block_itor};
 }
 
 static inline void ztream_hive_iterate(ztream_hive_t* hive, ztream_handler_t handler) {
-    for (ztream_hive_itor_t itor = ztream_hive_iterator(hive); ztream_hive_iterator_valid(&itor); itor = ztream_hive_next(hive, &itor)) {
+    ztream_hive_itor_t itor = ztream_hive_iterator(hive);
+    ztream_hive_itor_t next = ztream_hive_next(hive, &itor);
+    for (; ztream_hive_iterator_valid(&itor); itor = next, next = ztream_hive_next(hive, &itor)) {
         handler(ztream_hive_data(hive, &itor));
     }
 }

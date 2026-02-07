@@ -1,4 +1,4 @@
-// copyright. zjh 2025/11/23 - --
+// copyright. zmkjh 2025/11/23 - --
 
 #ifndef ZTREAM_EVENT_C
 #define ZTREAM_EVENT_C
@@ -42,7 +42,7 @@ static inline ztream_entry_t ztream_entry(char* buffer, uint32_t size) {
     result.buffer_size  = size-1;
     result.content_row  = 0;
     result.content_size = 0;
-    
+
     result.buffer[0] = '\0';
     memset(result.key_press_start, 0, sizeof(result.key_press_start));
 
@@ -158,12 +158,12 @@ static inline char ztream_keyboard_decode(int token, int shift, int caplock) {
 
     if ('0' <= token && token <= '9')
         return !shift ? token : map_num_symbol[token - '0'];
-        
+
     if ('A' <= token && token <= 'Z') {
         token += 'a'-'A';
         return !(shift ^ caplock) ? token : token + 'A'-'a';
     }
-    
+
     switch (token) {
         case ztream_key_sub:
             return !shift ? '-' : '_';
@@ -198,7 +198,7 @@ static inline char ztream_keyboard_decode(int token, int shift, int caplock) {
 
 static inline void ztream_entry_listen(ztream_entry_t* entry, ztream_coord_t zone, int react_time) {
     if (!entry->active) return;
-    
+
     for (int i = 0; i < sizeof(entry->key_press_start)/sizeof(entry->key_press_start[0]); i++) {
         // shift will not be handled independently.
         if (i == ztream_key_shift)
@@ -233,7 +233,7 @@ static inline void ztream_entry_listen(ztream_entry_t* entry, ztream_coord_t zon
                 continue;
             entry->key_press_start[i] = 1;
         }
-        
+
         // handle non-char keys
         switch (i) {
             case ztream_key_back:
@@ -264,7 +264,7 @@ static inline void ztream_entry_listen(ztream_entry_t* entry, ztream_coord_t zon
                 ztream_entry_cursor_down(entry);
                 continue;
         }
-        
+
         // decode token
         char token = ztream_keyboard_decode(i, shift, caplock);
         if (!token)

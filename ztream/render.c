@@ -1,4 +1,4 @@
-// copyright. zjh 2025/11/20 - --
+// copyright. zmkjh 2025/11/20 - --
 
 #ifndef ZTREAM_RENDER_C
 #define ZTREAM_RENDER_C
@@ -50,7 +50,7 @@ static inline void ztream_render() {
                 ztream.buffer_color_front_g[i][j],
                 ztream.buffer_color_front_b[i][j]
             );
- 
+
             // background color
             bp += swprintf((wchar_t *const)(buffer + bp), _ZTREAM_WCHAR_NUM_X,
                 L"\x1b[48;2;%u;%u;%um",
@@ -154,7 +154,7 @@ static inline void ztream_render_text_axis_x(ztream_text_t val, ztream_region_t 
 
             if (ztream.buffer_tex[region.y + i][region.x + j] == _ZTREAM_PLACE_HOLDER)
                 continue;
-                
+
             int val_width = mk_wcwidth_cjk(val[str_p]);
             if (region.x + j < ztream.buffer_width  &&
                 region.y + i < ztream.buffer_height &&

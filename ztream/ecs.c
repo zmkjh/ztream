@@ -1,4 +1,4 @@
-// copyright. zjh 2025/12/26 - --
+// copyright. zmkjh 2025/12/26 - --
 
 #ifndef ZTREAM_ECS_C
 #define ZTREAM_ECS_C
@@ -280,7 +280,7 @@ static inline ztream_entity_info_t ztream_entity_move_out(ztream_entity_t* entit
 static inline ztream_entity_t ztream_entity_move_in(ztream_entity_info_t* info) {
     ztream_entity_t entity = ztream_entity();
     ztream_entity_struct_t* entity_struct = ZTREAM_DATA_DECODE(ztream_hive_data(&ztream_ecs.entities, &entity), ztream_entity_struct_t);
-    
+
     ztream_container_revalue(&entity_struct->properties, ztream_container_size(&info->properties));
     ztream_container_revalue(&entity_struct->traits, ztream_container_size(&info->traits));
 
@@ -289,7 +289,7 @@ static inline ztream_entity_t ztream_entity_move_in(ztream_entity_info_t* info) 
         if (reg->valid) {
             ztream_hive_itor_t*         itor_data       = ZTREAM_DATA_DECODE(ztream_container_get(&entity_struct->properties, property), ztream_hive_itor_t);
             ztream_property_struct_t*   property_struct = ZTREAM_DATA_DECODE(ztream_container_get(&ztream_ecs.properties, property), ztream_property_struct_t);
-            
+
             *itor_data = ztream_hive_emplace(&property_struct->hive);
             memcpy(ztream_hive_data(&property_struct->hive, itor_data), reg->data, property_struct->hive.single);
         }

@@ -1,4 +1,4 @@
-// copyright. zjh 2025/11/21 - --
+// copyright. zmkjh 2025/11/21 - --
 
 #ifndef ZTREAM_TIMELORD_C
 #define ZTREAM_TIMELORD_C

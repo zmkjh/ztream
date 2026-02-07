@@ -1,4 +1,4 @@
-// copyright. zjh 2025/10/28 - --
+// copyright. zmkjh 2025/10/28 - --
 
 #ifndef STREAM_C
 #define STREAM_C
@@ -163,7 +163,7 @@ static inline BOOL WINAPI console_handler(DWORD type) {
     switch (type) {
         case CTRL_CLOSE_EVENT:
             _destroy_callback();
-            return TRUE; 
+            return TRUE;
         case CTRL_C_EVENT:
             return TRUE;
         default:
@@ -196,7 +196,7 @@ static inline void ztream_set_font(wchar_t* name, uint32_t size) {
     cfi.dwFontSize.Y = size;
     cfi.FontFamily = FF_DONTCARE;
     cfi.FontWeight = FW_NORMAL;
-    wcscpy(cfi.FaceName, name); 
+    wcscpy(cfi.FaceName, name);
 
     SetCurrentConsoleFontEx(ztream.out_handle, FALSE, &cfi);
 }
